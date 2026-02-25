@@ -7,7 +7,7 @@
  *
  */
 
-/* global ACTIVE_ENV ENV_LIST $ Bin */
+/* global ACTIVE_ENV ENV_LIST $ Bin Plotly */
 
 'use strict';
 
@@ -34,6 +34,7 @@ import {
 import ConnectionIndicator from './topbar/ConnectionIndicator';
 import EnvControls from './topbar/EnvControls';
 import FilterControls from './topbar/FilterControls';
+import ToolsControls from './topbar/ToolsControls';
 import ViewControls from './topbar/ViewControls';
 import WidthProvider from './Width';
 
@@ -97,6 +98,10 @@ const App = () => {
   const [showEnvModal, setShowEnvModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [focusedPaneID, setFocusedPaneID] = useState(null);
+  const [darkMode, setDarkMode] = useState(
+    localStorage.getItem('darkMode') === 'true'
+  );
+  const [logScaleEnabled, setLogScaleEnabled] = useState(false);
   const [selection, setSelection] = useState({
     envIDs: use_envs,
     layoutID: DEFAULT_LAYOUT,
@@ -105,6 +110,16 @@ const App = () => {
   const [filterString, setFilterString] = useState(
     localStorage.getItem('filter') || ''
   );
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (darkMode) {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+    localStorage.setItem('darkMode', darkMode ? 'true' : 'false');
+  }, [darkMode]);
 
   // non-triggering state variables
   const _bin = useRef(null);
@@ -146,6 +161,88 @@ const App = () => {
       filter = '';
     }
     return filter;
+  };
+
+  // Build base URL for share links
+  const correctPathname = () => {
+    var pathname = window.location.pathname;
+    if (pathname.indexOf('/env/') > -1) {
+      pathname = pathname.split('/env/')[0];
+    } else if (pathname.indexOf('/compare/') > -1) {
+      pathname = pathname.split('/compare/')[0];
+    }
+    if (pathname.slice(-1) != '/') {
+      pathname = pathname + '/';
+    }
+    return pathname;
+  };
+
+  const buildShareUrl = () => {
+    const base = window.location.origin + correctPathname();
+    if (selection.envIDs.length > 1) {
+      const envs = selection.envIDs.map((eid) => encodeURIComponent(eid));
+      return base + 'compare/' + envs.join('+');
+    }
+    const env = selection.envIDs[0] || 'main';
+    return base + 'env/' + encodeURIComponent(env);
+  };
+
+  const copyToClipboard = async (text) => {
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return;
+      } catch (err) {
+        // fall back to execCommand
+      }
+    }
+    const temp = document.createElement('input');
+    temp.value = text;
+    temp.setAttribute('readonly', '');
+    temp.style.position = 'absolute';
+    temp.style.left = '-9999px';
+    document.body.appendChild(temp);
+    temp.select();
+    try {
+      document.execCommand('copy');
+    } catch (err) {
+      // ignore
+    }
+    temp.remove();
+  };
+
+  const handleShare = async () => {
+    const url = buildShareUrl();
+    await copyToClipboard(url);
+    if (typeof $ !== 'undefined') {
+      const shareBtn = $('#tools-share');
+      if (shareBtn.length) {
+        shareBtn.tooltip('show');
+        setTimeout(() => {
+          shareBtn.tooltip('hide');
+        }, 1000);
+      }
+    }
+  };
+
+  const toggleDarkMode = () => {
+    setDarkMode((prev) => !prev);
+  };
+
+  const toggleLogScale = () => {
+    if (typeof Plotly === 'undefined') {
+      return;
+    }
+    document.querySelectorAll('.js-plotly-plot').forEach((chart) => {
+      if (!chart.layout || !chart.layout.yaxis) return;
+      const type = chart.layout.yaxis.type;
+      if (type == 'linear' || type == 'log') {
+        Plotly.relayout(chart, {
+          'yaxis.type': type == 'linear' ? 'log' : 'linear',
+        });
+      }
+    });
+    setLogScaleEnabled((prev) => !prev);
   };
 
   // ------------------ //
@@ -828,6 +925,16 @@ const App = () => {
       }}
     />
   );
+  let toolsControls = (
+    <ToolsControls
+      envIDs={selection.envIDs}
+      darkMode={darkMode}
+      logScaleEnabled={logScaleEnabled}
+      onToggleDarkMode={toggleDarkMode}
+      onToggleLogScale={toggleLogScale}
+      onShare={handleShare}
+    />
+  );
   let connectionIndicator = <ConnectionIndicator onClick={toggleOnlineState} />;
 
   const onDisconnect = (_socket) => {
@@ -861,6 +968,10 @@ const App = () => {
         <span className="vertical-line" />
         &nbsp;&nbsp;
         {viewControls}
+        &nbsp;&nbsp;
+        <span className="vertical-line" />
+        &nbsp;&nbsp;
+        {toolsControls}
         <span
           style={{
             float: 'right',
